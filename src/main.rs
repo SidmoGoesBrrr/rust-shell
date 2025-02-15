@@ -14,6 +14,11 @@ fn main() {
         if input.trim()=="exit 0" {
             process::exit(0);
         }
+        if input.trim().contains("echo") {
+            println!("{}",input.trim().replace("echo ", ""));
+            continue;
+        }
+
         println!("{}: command not found", input.trim());
         
 
