@@ -41,7 +41,7 @@ fn main() {
     }
 }
 
-/// Handles built-in commands (`exit`, `echo`, `type`)
+/// Handles built-in commands (`exit`, `echo`, `type` , `pwd`)
 fn handle_builtin(command: &str, args: &[&str]) -> bool {
     match command {
         "exit" => {
@@ -56,6 +56,14 @@ fn handle_builtin(command: &str, args: &[&str]) -> bool {
                 handle_type_command(cmd);
             }
             return true;
+
+        }
+        "pwd" => {
+            match env::current_dir(){
+                Ok(path) => println!("{}",path.display()),
+                Err(e) => eprintln!("pwd: error getting current directory: {}", e),
+            }
+            return true;
         }
         _ => false,
     }
@@ -63,7 +71,7 @@ fn handle_builtin(command: &str, args: &[&str]) -> bool {
 
 /// Handles `type` command, checking if a command is built-in or an executable
 fn handle_type_command(command: &str) {
-    let builtins = ["echo", "exit", "type"];
+    let builtins = ["echo", "exit", "type","pwd"];
     if builtins.contains(&command) {
         println!("{} is a shell builtin", command);
         return;
