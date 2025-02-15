@@ -1,6 +1,6 @@
 use std::env;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 fn main() {
     let stdin = io::stdin();
@@ -78,32 +78,47 @@ fn handle_builtin(command: &str, args: &[&str]) -> bool {
     }
 }
 
-/// Changes the current working directory
+////// Changes the current working directory, handling absolute, relative, and `~` paths
 fn change_directory(path: &str) {
     let path_obj = Path::new(path);
+    let mut new_path: PathBuf;
 
-         // If the path is absolute, use it directly
-    let new_path = if path_obj.is_absolute() {
-        path_obj.to_path_buf()
-    } else {
-        // Resolve relative paths using the current working directory
+    // Handle `~` for home directory
+    if path.starts_with("~") {
+        if let Some(home_dir) = env::var("HOME").ok() {
+            new_path = PathBuf::from(home_dir);
+            if path != "~" {
+                new_path.push(&path[2..]); // Append relative path after `~/`
+            }
+        } else {
+            eprintln!("cd: HOME environment variable not set");
+            return;
+        }
+    }
+    // Handle absolute paths
+    else if path_obj.is_absolute() {
+        new_path = path_obj.to_path_buf();
+    }
+    // Handle relative paths
+    else {
         match env::current_dir() {
-            Ok(current_dir) => current_dir.join(path),
+            Ok(current_dir) => new_path = current_dir.join(path),
             Err(_) => {
                 eprintln!("cd: error getting current directory");
                 return;
             }
         }
-    };
-        if new_path.exists() && new_path.is_dir() {
-            if let Err(e) = env::set_current_dir(&new_path) {
-                eprintln!("cd: {}: {}", new_path.display(), e);
-            }
-        } else {
-            eprintln!("cd: {}: No such file or directory", new_path.display());
-        }
-    } 
+    }
 
+    // Change directory if valid
+    if new_path.exists() && new_path.is_dir() {
+        if let Err(e) = env::set_current_dir(&new_path) {
+            eprintln!("cd: {}: {}", new_path.display(), e);
+        }
+    } else {
+        eprintln!("cd: {}: No such file or directory", new_path.display());
+    }
+}
 /// Handles `type` command, checking if a command is built-in or an executable
 fn handle_type_command(command: &str) {
     let builtins = ["echo", "exit", "type", "pwd", "cd"];
