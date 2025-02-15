@@ -1,7 +1,6 @@
 use std::env;
 use std::io::{self, Write};
-use std::fs;
-use std::path::Path;
+use std::process::{Command, Stdio, ExitStatus};
 
 fn main() {
     let stdin = io::stdin();
@@ -14,63 +13,91 @@ fn main() {
         stdin.read_line(&mut input).unwrap();
 
         let trimmed_input = input.trim();
-
-        // Handle exit command
-        if trimmed_input == "exit 0" {
-            std::process::exit(0);
-        }
-
-        // Handle echo command
-        if trimmed_input.starts_with("echo ") {
-            if let Some(text) = trimmed_input.strip_prefix("echo ") {
-                println!("{}", text);
-            }
+        if trimmed_input.is_empty() {
             continue;
         }
 
-        // Handle type command
-        if trimmed_input.starts_with("type ") {
-            if let Some(command) = trimmed_input.strip_prefix("type ") {
-                handle_type_command(command.trim());
-            }
+        // Split input into command and arguments
+        let mut parts = trimmed_input.split_whitespace();
+        let command = parts.next().unwrap();
+        let args: Vec<&str> = parts.collect();
+
+        // Handle built-in commands
+        if handle_builtin(command, &args) {
             continue;
         }
 
-        // If command is not recognized
-        println!("{}: command not found", trimmed_input);
+        // Try running an external command
+        match run_external_command(command, &args) {
+            Ok(status) => {
+                if !status.success() {
+                    println!("{}: command exited with status {}", command, status);
+                }
+            }
+            Err(_) => {
+                println!("{}: command not found", command);
+            }
+        }
     }
 }
 
-/// Handles the `type` command: checks if a command is a built-in or an executable in `PATH`
-fn handle_type_command(command: &str) {
-    // List of built-in commands
-    let builtins = ["echo", "exit","type"];
+/// Handles built-in commands (`exit`, `echo`, `type`)
+fn handle_builtin(command: &str, args: &[&str]) -> bool {
+    match command {
+        "exit" => {
+            std::process::exit(0);
+        }
+        "echo" => {
+            println!("{}", args.join(" "));
+            return true;
+        }
+        "type" => {
+            if let Some(cmd) = args.first() {
+                handle_type_command(cmd);
+            }
+            return true;
+        }
+        _ => false,
+    }
+}
 
-    // Check if it's a built-in command
+/// Handles `type` command, checking if a command is built-in or an executable
+fn handle_type_command(command: &str) {
+    let builtins = ["echo", "exit", "type"];
     if builtins.contains(&command) {
         println!("{} is a shell builtin", command);
         return;
     }
 
-    // Get the PATH environment variable
+    if let Some(path) = find_executable(command) {
+        println!("{} is {}", command, path);
+    } else {
+        println!("{}: not found", command);
+    }
+}
+
+/// Finds an executable in `PATH`
+fn find_executable(command: &str) -> Option<String> {
     if let Ok(paths) = env::var("PATH") {
         for dir in paths.split(':') {
             let full_path = format!("{}/{}", dir, command);
-            if Path::new(&full_path).exists() && is_executable(&full_path) {
-                println!("{} is {}", command, full_path);
-                return;
+            if std::path::Path::new(&full_path).exists() {
+                return Some(full_path);
             }
         }
     }
-
-    // If the command is neither a built-in nor found in PATH
-    println!("{}: not found", command);
+    None
 }
 
-/// Checks if a file is executable
-fn is_executable(path: &str) -> bool {
-    if let Ok(metadata) = fs::metadata(path) {
-        return metadata.is_file(); // Simplified check (for Unix, we would check permissions)
-    }
-    false
+/// Runs an external command with arguments
+fn run_external_command(command: &str, args: &[&str]) -> Result<ExitStatus, std::io::Error> {
+    let mut child = Command::new(command)
+        .args(args)
+        .stdin(Stdio::inherit()) // Pass user input to the command
+        .stdout(Stdio::inherit()) // Print command output directly
+        .stderr(Stdio::inherit()) // Print errors directly
+        .spawn()?; // Execute command
+
+    let status = child.wait()?; // Wait for command to finish
+    Ok(status)
 }
