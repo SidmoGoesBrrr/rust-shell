@@ -1,7 +1,7 @@
 use std::env;
 use std::io::{self, Write};
-use std::process::{Command, Stdio, ExitStatus};
-
+use std::path::Path;
+use std::process::{Command, ExitStatus, Stdio};
 fn main() {
     let stdin = io::stdin();
     let mut input = String::new();
@@ -56,22 +56,48 @@ fn handle_builtin(command: &str, args: &[&str]) -> bool {
                 handle_type_command(cmd);
             }
             return true;
-
         }
         "pwd" => {
-            match env::current_dir(){
-                Ok(path) => println!("{}",path.display()),
+            match env::current_dir() {
+                Ok(path) => println!("{}", path.display()),
                 Err(e) => eprintln!("pwd: error getting current directory: {}", e),
             }
             return true;
         }
+
+        "cd" => {
+            if let Some(dir) = args.first() {
+                change_directory(dir);
+            } else {
+                eprintln!("cd: missing argument")
+            }
+            return true;
+        }
+
         _ => false,
+    }
+}
+
+/// Changes the current working directory
+fn change_directory(path: &str) {
+    let path_obj = Path::new(path);
+
+    if path_obj.is_absolute() {
+        if path_obj.exists() && path_obj.is_dir() {
+            if let Err(e) = env::set_current_dir(path_obj) {
+                eprintln!("cd: {}: {}", path, e);
+            }
+        } else {
+            eprintln!("cd: {}: No such file or directory", path);
+        }
+    } else {
+        eprintln!("cd: {}: No such file or directory", path);
     }
 }
 
 /// Handles `type` command, checking if a command is built-in or an executable
 fn handle_type_command(command: &str) {
-    let builtins = ["echo", "exit", "type","pwd"];
+    let builtins = ["echo", "exit", "type", "pwd", "cd"];
     if builtins.contains(&command) {
         println!("{} is a shell builtin", command);
         return;
