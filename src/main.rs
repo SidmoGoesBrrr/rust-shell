@@ -41,7 +41,7 @@ fn main() {
     }
 }
 
-/// Handles built-in commands (`exit`, `echo`, `type` , `pwd`)
+/// Handles built-in commands (`exit`, `echo`, `type` , `pwd` , `cd` )
 fn handle_builtin(command: &str, args: &[&str]) -> bool {
     match command {
         "exit" => {
@@ -82,18 +82,27 @@ fn handle_builtin(command: &str, args: &[&str]) -> bool {
 fn change_directory(path: &str) {
     let path_obj = Path::new(path);
 
-    if path_obj.is_absolute() {
-        if path_obj.exists() && path_obj.is_dir() {
-            if let Err(e) = env::set_current_dir(path_obj) {
-                eprintln!("cd: {}: {}", path, e);
+         // If the path is absolute, use it directly
+    let new_path = if path_obj.is_absolute() {
+        path_obj.to_path_buf()
+    } else {
+        // Resolve relative paths using the current working directory
+        match env::current_dir() {
+            Ok(current_dir) => current_dir.join(path),
+            Err(_) => {
+                eprintln!("cd: error getting current directory");
+                return;
+            }
+        }
+    };
+        if new_path.exists() && new_path.is_dir() {
+            if let Err(e) = env::set_current_dir(&new_path) {
+                eprintln!("cd: {}: {}", new_path.display(), e);
             }
         } else {
-            eprintln!("cd: {}: No such file or directory", path);
+            eprintln!("cd: {}: No such file or directory", new_path.display());
         }
-    } else {
-        eprintln!("cd: {}: No such file or directory", path);
-    }
-}
+    } 
 
 /// Handles `type` command, checking if a command is built-in or an executable
 fn handle_type_command(command: &str) {
