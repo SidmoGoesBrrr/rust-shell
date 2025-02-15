@@ -48,7 +48,9 @@ fn handle_builtin(command: &str, args: &[&str]) -> bool {
             std::process::exit(0);
         }
         "echo" => {
+            args.join("").replace("''","");
             println!("{}", args.join(" "));
+
             return true;
         }
         "type" => {
