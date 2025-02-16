@@ -2,16 +2,14 @@ pub fn parse_parameters(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut chars = input.chars().peekable();
-    let mut in_quotes: Option<char> = None; // None means we're not in a quote; Some(quote) means we are
-    
+    let mut in_quotes: Option<char> = None; // None = not in quotes; Some(q) = in quotes with q
+
     while let Some(c) = chars.next() {
         if let Some(q) = in_quotes {
-            // Inside a quoted segment.
+            // When inside quotes, do not treat backslashes specially.
             if c == q {
-                // End of quote.
-                in_quotes = None;
+                in_quotes = None; // closing quote
             } else {
-                // In quotes, we do NOT process backslashes; they're literal.
                 current.push(c);
             }
         } else {
@@ -20,22 +18,22 @@ pub fn parse_parameters(input: &str) -> Vec<String> {
                 // Begin a quoted segment.
                 '"' | '\'' => {
                     in_quotes = Some(c);
-                },
-                // Backslash escapes the next character.
+                }
+                // Outside quotes, backslash escapes the next character.
                 '\\' => {
                     if let Some(&next_char) = chars.peek() {
                         current.push(next_char);
-                        chars.next(); // consume the escaped character
+                        chars.next(); // consume escaped character
                     }
-                },
-                // Whitespace: if token is non-empty, finish it.
+                }
+                // Whitespace: if we have a token, finish it.
                 c if c.is_whitespace() => {
                     if !current.is_empty() {
                         tokens.push(current);
                         current = String::new();
                     }
-                    // Otherwise, skip consecutive whitespace.
-                },
+                    // Skip additional whitespace.
+                }
                 // Regular character.
                 other => {
                     current.push(other);
@@ -43,10 +41,9 @@ pub fn parse_parameters(input: &str) -> Vec<String> {
             }
         }
     }
-    
+
     if !current.is_empty() {
         tokens.push(current);
     }
-    
     tokens
 }
