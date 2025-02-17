@@ -1,7 +1,7 @@
 use nix::libc;
 use std::io::{self, Write};
 
-// Import command handlers.
+// Import your command handlers.
 use crate::commands::echo::handle_echo_command;
 use crate::commands::cd::handle_cd_command;
 use crate::commands::type_cmd::handle_type_command;
@@ -17,8 +17,8 @@ struct RedirectionSpec {
     stderr: Option<(String, bool)>, // (filename, append) for stderr
 }
 
-/// Splits an input line into the command portion and a redirection specification.
-/// Assumes redirection tokens (>, >>, 2>, 2>>) are separated by whitespace.
+/// Splits the input line into the command portion and a redirection specification.
+/// It assumes that redirection tokens (>, >>, 2>, 2>>) are separated by whitespace.
 fn parse_command_and_redirections(input: &str) -> (String, RedirectionSpec) {
     let mut redir = RedirectionSpec {
         stdout: None,
@@ -34,25 +34,25 @@ fn parse_command_and_redirections(input: &str) -> (String, RedirectionSpec) {
                     redir.stderr = Some((tokens[i + 1].to_string(), true));
                     i += 2;
                 } else { break; }
-            }
+            },
             "2>" => {
                 if i + 1 < tokens.len() {
                     redir.stderr = Some((tokens[i + 1].to_string(), false));
                     i += 2;
                 } else { break; }
-            }
+            },
             "1>>" | ">>" => {
                 if i + 1 < tokens.len() {
                     redir.stdout = Some((tokens[i + 1].to_string(), true));
                     i += 2;
                 } else { break; }
-            }
+            },
             "1>" | ">" => {
                 if i + 1 < tokens.len() {
                     redir.stdout = Some((tokens[i + 1].to_string(), false));
                     i += 2;
                 } else { break; }
-            }
+            },
             token => {
                 cmd_tokens.push(token);
                 i += 1;
@@ -121,7 +121,7 @@ fn process_command(cmd: &str) {
     println!("{}: command not found", cmd);
 }
 
-// --------------------- External Completion Helpers ---------------------
+// --------------------- External Command Completion Helpers ---------------------
 
 /// Returns all external executable candidates in PATH matching the given prefix.
 fn get_external_candidates(prefix: &str) -> Vec<String> {
@@ -156,14 +156,18 @@ fn get_external_candidates(prefix: &str) -> Vec<String> {
     candidates
 }
 
-/// Returns the longest common prefix of a list of strings.
+/// Returns the longest common prefix among a list of strings.
 fn longest_common_prefix(strings: &[String]) -> String {
-    if strings.is_empty() { return "".to_string(); }
+    if strings.is_empty() {
+        return "".to_string();
+    }
     let mut prefix = strings[0].clone();
     for s in strings.iter().skip(1) {
         while !s.starts_with(&prefix) {
             prefix.pop();
-            if prefix.is_empty() { break; }
+            if prefix.is_empty() {
+                break;
+            }
         }
     }
     prefix
@@ -188,26 +192,27 @@ impl Candidate for MyCandidate {
 }
 
 struct MyHelper {
-    // Store the last input and completion count for repeated TAB presses.
     last_input: RefCell<Option<String>>,
     completion_count: RefCell<usize>,
 }
 impl MyHelper {
     fn new() -> Self {
-        MyHelper { last_input: RefCell::new(None), completion_count: RefCell::new(0) }
+        MyHelper {
+            last_input: RefCell::new(None),
+            completion_count: RefCell::new(0),
+        }
     }
 }
 
 impl Completer for MyHelper {
     type Candidate = MyCandidate;
-    fn complete(&self, line: &str, _pos: usize, _ctx: &Context<'_>) 
-        -> rustyline::Result<(usize, Vec<MyCandidate>)> 
-    {
-        // If the line is not a single token, do not complete.
+
+    fn complete(&self, line: &str, _pos: usize, _ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<MyCandidate>)> {
+        // Only complete if the input is a single token.
         if line.contains(' ') {
             return Ok((0, Vec::new()));
         }
-        // Reset state if input changed.
+        // Reset state if the input has changed.
         {
             let mut last = self.last_input.borrow_mut();
             if last.as_deref() != Some(line) {
@@ -221,7 +226,7 @@ impl Completer for MyHelper {
         // Gather builtin candidates.
         let mut candidates: Vec<String> = ["echo", "exit"]
             .iter()
-            .filter(|&&cmd| cmd.starts_with(line) && cmd != line)
+            .filter(|&&cmd| cmd.starts_with(line))
             .map(|&s| s.to_string())
             .collect();
         // Gather external candidates.
@@ -233,26 +238,29 @@ impl Completer for MyHelper {
         if candidates.is_empty() {
             return Ok((0, Vec::new()));
         }
-
         let lcp = longest_common_prefix(&candidates);
         if lcp.len() > line.len() {
-            // There's a clear extension.
+            // We can extend the input.
             return Ok((0, vec![MyCandidate(format!("{} ", lcp))]));
+        } else if lcp.len() == line.len() {
+            if candidates.len() == 1 {
+                // Only one candidate; complete it.
+                return Ok((0, vec![MyCandidate(format!("{} ", candidates[0]))]));
+            } else {
+                // Multiple candidates with no further extension.
+                if count == 1 {
+                    // First TAB press: return no candidates (ring bell).
+                    return Ok((0, Vec::new()));
+                } else {
+                    // Second or subsequent TAB press: print all candidates.
+                    println!();
+                    println!("{}", candidates.join("  "));
+                    *self.completion_count.borrow_mut() = 0;
+                    return Ok((0, vec![MyCandidate(line.to_string())]));
+                }
+            }
         }
-        if candidates.len() == 1 {
-            return Ok((0, vec![MyCandidate(format!("{} ", candidates[0]))]));
-        }
-        // Multiple matches with no further extension.
-        if count == 1 {
-            // First TAB: ring bell (return no candidates).
-            return Ok((0, Vec::new()));
-        } else {
-            // Second (or later) TAB: print all candidates, then return the current line.
-            println!();
-            println!("{}", candidates.join("  "));
-            *self.completion_count.borrow_mut() = 0;
-            return Ok((0, vec![MyCandidate(line.to_string())]));
-        }
+        Ok((0, Vec::new()))
     }
 }
 impl Hinter for MyHelper {
@@ -275,7 +283,6 @@ pub fn start_shell() {
                 rl.add_history_entry(line.as_str());
                 let trimmed = line.trim_end_matches('\n');
                 if trimmed.is_empty() { continue; }
-                // Check if the input contains redirection.
                 if trimmed.contains('>') {
                     let (cmd_part, redir_spec) = parse_command_and_redirections(trimmed);
                     run_command_with_redirections(&cmd_part, redir_spec);
