@@ -195,13 +195,16 @@ impl MyHelper {
         MyHelper { last_input: RefCell::new(None), completion_count: RefCell::new(0) }
     }
 }
-
 impl Completer for MyHelper {
     type Candidate = MyCandidate;
 
-    fn complete(&self, line: &str, _pos: usize, _ctx: &Context<'_>) 
-        -> rustyline::Result<(usize, Vec<MyCandidate>)> 
-    {
+    fn complete(
+        &self,
+        line: &str,
+        _pos: usize,
+        _ctx: &Context<'_>
+    ) -> rustyline::Result<(usize, Vec<MyCandidate>)> {
+
         // Reset state if the line has changed.
         {
             let mut last = self.last_input.borrow_mut();
@@ -213,19 +216,19 @@ impl Completer for MyHelper {
         *self.completion_count.borrow_mut() += 1;
         let count = *self.completion_count.borrow();
 
-        // Builtin completions (for "echo" and "exit").
+        // Built-in commands:
         let builtin_candidates: Vec<String> = ["echo", "exit"]
             .iter()
             .filter(|&&cmd| cmd.starts_with(line) && cmd != line)
             .map(|&s| s.to_string())
             .collect();
 
-        // External command completions.
+        // External commands:
         let mut external_candidates = get_external_candidates(line);
         external_candidates.sort();
         external_candidates.dedup();
 
-        // Combine candidates.
+        // Combine them:
         let mut all_candidates = builtin_candidates;
         all_candidates.extend(external_candidates);
         all_candidates.sort();
@@ -235,25 +238,33 @@ impl Completer for MyHelper {
             return Ok((0, Vec::new()));
         }
 
-        // Compute the longest common prefix.
+        // If there's exactly one candidate, return it with a trailing space:
+        if all_candidates.len() == 1 {
+            let candidate = &all_candidates[0];
+            // Always append a space to match the test's expectation.
+            return Ok((0, vec![MyCandidate(format!("{} ", candidate))]));
+        }
+
+        // Otherwise, see if there's a usable longest common prefix:
         let lcp = longest_common_prefix(&all_candidates);
         if lcp.len() > line.len() {
-            // There is an unambiguous extension.
-            return Ok((0, vec![MyCandidate(format!("{} ", lcp))]));
+            // Provide the longest common prefix as the single completion
+            return Ok((0, vec![MyCandidate(lcp)]));
         }
-        if all_candidates.len() == 1 {
-            // Only one candidate.
-            return Ok((0, vec![MyCandidate(format!("{} ", all_candidates[0]))]));
-        }
-        // Multiple matches and no progress can be made.
+
+        // If no progress can be made, handle repeated TAB presses:
         if count == 1 {
-            // First TAB: ring a bell (returning no candidates causes rustyline to beep).
+            // On first TAB with multiple matches, beep:
             return Ok((0, Vec::new()));
         } else {
-            // Second (or later) TAB: print all candidates.
-            println!();
+            println!(); // Blank line
             println!("{}", all_candidates.join("  "));
-            *self.completion_count.borrow_mut() = 0; // reset count
+            
+            // Re‐show prompt and the partial line
+            print!("$ {}", line);
+            std::io::stdout().flush().unwrap();
+        
+            *self.completion_count.borrow_mut() = 0;
             return Ok((0, Vec::new()));
         }
     }
@@ -277,14 +288,13 @@ pub fn start_shell() {
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
-                let trimmed = line.trim_end_matches('\n');
+                let trimmed = line.trim_end_matches('\n').replace("\u{00A0}", " ");
                 if trimmed.is_empty() { continue; }
-                // If the line contains redirection, process it.
                 if trimmed.contains('>') {
-                    let (cmd_part, redir_spec) = parse_command_and_redirections(trimmed);
+                    let (cmd_part, redir_spec) = parse_command_and_redirections(&trimmed);
                     run_command_with_redirections(&cmd_part, redir_spec);
                 } else {
-                    process_command(trimmed);
+                    process_command(&trimmed);
                 }
             },
             Err(ReadlineError::Interrupted) => {
@@ -424,7 +434,7 @@ pub fn start_shell() {
                 
                 /// Returns all external executable candidates in PATH matching the given prefix.
                 fn get_external_candidates(prefix: &str) -> Vec<String> {
-                    let mut candidates = Vec::new();
+                    let mut candidates: Vec<String> = Vec::new();
                     if let Ok(path_var) = std::env::var("PATH") {
                         for dir in path_var.split(':') {
                             if let Ok(entries) = std::fs::read_dir(dir) {
@@ -518,28 +528,31 @@ pub fn start_shell() {
                         let count = *self.completion_count.borrow();
                 
                         // Gather builtin candidates.
-                        let mut candidates: Vec<String> = ["echo", "exit"]
+                        let mut all_candidates: Vec<String> = ["echo", "exit"]
                             .iter()
                             .filter(|&&cmd| cmd.starts_with(line) && cmd != line)
                             .map(|&s| s.to_string())
                             .collect();
                         // Gather external candidates.
-                        let mut external = get_external_candidates(line);
-                        candidates.append(&mut external);
-                        candidates.sort();
-                        candidates.dedup();
+                        let mut external_candidates = get_external_candidates(line);
+                        all_candidates.append(&mut external_candidates);
+                        all_candidates.sort();
+                        all_candidates.dedup();
                 
-                        if candidates.is_empty() {
+                        if all_candidates.is_empty() {
                             return Ok((0, Vec::new()));
                         }
                 
-                        let lcp = longest_common_prefix(&candidates);
-                        if lcp.len() > line.len() {
-                            // There's a clear extension.
-                            return Ok((0, vec![MyCandidate(format!("{} ", lcp))]));
+                        // Compute the longest common prefix.
+                        if all_candidates.len() == 1 {
+                            let candidate = &all_candidates[0];
+                            // Always append a normal space so the test sees a trailing space.
+                            return Ok((0, vec![MyCandidate(format!("{} ", candidate))]));
                         }
-                        if candidates.len() == 1 {
-                            return Ok((0, vec![MyCandidate(format!("{} ", candidates[0]))]));
+                        let lcp = longest_common_prefix(&all_candidates);
+                        if lcp.len() > line.len() {
+                            // Multiple candidates: complete to the longest common prefix with no trailing space.
+                            return Ok((0, vec![MyCandidate(lcp)]));
                         }
                         // Multiple matches with no further extension.
                         if count == 1 {
@@ -548,7 +561,7 @@ pub fn start_shell() {
                         } else {
                             // Second (or later) TAB: print all candidates, then return the current line.
                             println!();
-                            println!("{}", candidates.join("  "));
+                            println!("{}", all_candidates.join("  "));
                             *self.completion_count.borrow_mut() = 0;
                             return Ok((0, vec![MyCandidate(line.to_string())]));
                         }
@@ -565,22 +578,28 @@ pub fn start_shell() {
                 // --------------------- REPL Loop using Rustyline ---------------------
                 
                 pub fn start_shell() {
-                    let mut rl = Editor::<MyHelper, DefaultHistory>::new().unwrap();
+                    use rustyline::Config;
+                    let config = Config::builder()
+                        .build();
+                    let mut rl = Editor::<MyHelper, DefaultHistory>::with_config(config).unwrap();
                     rl.set_helper(Some(MyHelper::new()));
                     loop {
                         let readline = rl.readline("$ ");
                         match readline {
                             Ok(line) => {
                                 rl.add_history_entry(line.as_str());
-                                let trimmed = line.trim_end_matches('\n');
-                                if trimmed.is_empty() { continue; }
-                                // Check if the input contains redirection.
+                                let trimmed = line.trim_end_matches('\n').replace("\u{00A0}", " ");
+                                                                
+                                if trimmed.is_empty() {
+                                    continue;
+                                }
                                 if trimmed.contains('>') {
-                                    let (cmd_part, redir_spec) = parse_command_and_redirections(trimmed);
+                                    let (cmd_part, redir_spec) = parse_command_and_redirections(&trimmed);
                                     run_command_with_redirections(&cmd_part, redir_spec);
                                 } else {
-                                    process_command(trimmed);
+                                    process_command(&trimmed);
                                 }
+
                             },
                             Err(ReadlineError::Interrupted) => {
                                 println!("CTRL-C");

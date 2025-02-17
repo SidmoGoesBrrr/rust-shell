@@ -12,8 +12,8 @@ pub fn parse_parameters(input: &str) -> Vec<String> {
                 in_quotes = None;
             } else if q == '"' && c == '\\' {
                 // Inside double quotes, a backslash is special if followed by \, $, " or newline.
-                if let Some(&next_char) = chars.peek() {
-                    if next_char == '\\' || next_char == '$' || next_char == '"' || next_char == '\n' {
+                if let Some(&_next_char) = chars.peek() {
+                    if _next_char == '\\' || _next_char == '$' || _next_char == '"' || _next_char == '\n' {
                         // Consume next char and push it.
                         current.push(chars.next().unwrap());
                     } else {
