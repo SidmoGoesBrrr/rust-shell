@@ -1,17 +1,15 @@
 use nix::libc;
 use std::io::{self, Write};
 
+// Import your command handlers.
 use crate::commands::echo::handle_echo_command;
 use crate::commands::cd::handle_cd_command;
 use crate::commands::type_cmd::handle_type_command;
 use crate::commands::pwd::handle_pwd_command;
 use crate::commands::execute::handle_execute_command;
 use crate::commands::exit::handle_exit_command;
-use crate::util::parse_parameters;
 
-// ----------------------------------------------------------------
-// Redirection Support
-// ----------------------------------------------------------------
+// --------------------- Redirection Support ---------------------
 
 #[derive(Debug)]
 struct RedirectionSpec {
@@ -19,8 +17,8 @@ struct RedirectionSpec {
     stderr: Option<(String, bool)>, // (filename, append) for stderr
 }
 
-/// Parses the input line into a command part and a redirection specification.
-/// It expects redirection tokens (>, >>, 2>, 2>>) to be separated by whitespace.
+/// Parses the input line into the command part and a redirection specification.
+/// Assumes that redirection tokens (>, >>, 2>, 2>>) are separated by whitespace.
 fn parse_command_and_redirections(input: &str) -> (String, RedirectionSpec) {
     let mut redir = RedirectionSpec { stdout: None, stderr: None };
     let tokens: Vec<&str> = input.split_whitespace().collect();
@@ -30,25 +28,25 @@ fn parse_command_and_redirections(input: &str) -> (String, RedirectionSpec) {
         match tokens[i] {
             "2>>" => {
                 if i + 1 < tokens.len() {
-                    redir.stderr = Some((tokens[i+1].to_string(), true));
+                    redir.stderr = Some((tokens[i + 1].to_string(), true));
                     i += 2;
                 } else { break; }
             },
             "2>" => {
                 if i + 1 < tokens.len() {
-                    redir.stderr = Some((tokens[i+1].to_string(), false));
+                    redir.stderr = Some((tokens[i + 1].to_string(), false));
                     i += 2;
                 } else { break; }
             },
             "1>>" | ">>" => {
                 if i + 1 < tokens.len() {
-                    redir.stdout = Some((tokens[i+1].to_string(), true));
+                    redir.stdout = Some((tokens[i + 1].to_string(), true));
                     i += 2;
                 } else { break; }
             },
             "1>" | ">" => {
                 if i + 1 < tokens.len() {
-                    redir.stdout = Some((tokens[i+1].to_string(), false));
+                    redir.stdout = Some((tokens[i + 1].to_string(), false));
                     i += 2;
                 } else { break; }
             },
@@ -80,7 +78,8 @@ fn run_command_with_redirections(cmd: &str, redir: RedirectionSpec) {
             .truncate(!append)
             .open(file)
             .expect("failed to open stdout redirection file");
-        dup2(file_handle.as_raw_fd(), libc::STDOUT_FILENO).expect("dup2 failed for stdout");
+        dup2(file_handle.as_raw_fd(), libc::STDOUT_FILENO)
+            .expect("dup2 failed for stdout");
     }
     // Redirect stderr if specified.
     if let Some((ref file, append)) = redir.stderr {
@@ -91,45 +90,27 @@ fn run_command_with_redirections(cmd: &str, redir: RedirectionSpec) {
             .truncate(!append)
             .open(file)
             .expect("failed to open stderr redirection file");
-        dup2(file_handle.as_raw_fd(), libc::STDERR_FILENO).expect("dup2 failed for stderr");
+        dup2(file_handle.as_raw_fd(), libc::STDERR_FILENO)
+            .expect("dup2 failed for stderr");
     }
 
-    // Execute the command.
     process_command(cmd);
 
     io::stdout().flush().unwrap();
     io::stderr().flush().unwrap();
 
     // Restore original stdout and stderr.
-    dup2(stdout_fd, libc::STDOUT_FILENO).expect("dup2 restore failed for stdout");
-    dup2(stderr_fd, libc::STDERR_FILENO).expect("dup2 restore failed for stderr");
+    dup2(stdout_fd, libc::STDOUT_FILENO)
+        .expect("dup2 restore failed for stdout");
+    dup2(stderr_fd, libc::STDERR_FILENO)
+        .expect("dup2 restore failed for stderr");
     close(stdout_fd).ok();
     close(stderr_fd).ok();
 }
 
-// ----------------------------------------------------------------
-// Autocompletion for Builtins
-// ----------------------------------------------------------------
+// --------------------- Command Processing ---------------------
 
-/// Autocompletes the built-in command if the input matches a prefix of "echo" or "exit".
-fn autocomplete_builtin(input: &str) -> Option<String> {
-    let builtins = vec!["echo", "exit"];
-    let input_trimmed = input.trim();
-    let matches: Vec<&str> = builtins.into_iter().filter(|cmd| cmd.starts_with(input_trimmed)).collect();
-    if matches.len() == 1 {
-        Some(format!("{} ", matches[0]))
-    } else if matches.len() > 1 {
-        Some(format!("{} ", matches[0]))
-    } else {
-        None
-    }
-}
-
-// ----------------------------------------------------------------
-// Command Processing
-// ----------------------------------------------------------------
-
-/// Dispatches a command (without redirections) to builtins or external commands.
+/// Dispatches a command (without redirections) to the appropriate builtin or external handler.
 fn process_command(cmd: &str) {
     if handle_echo_command(cmd) { return; }
     if handle_cd_command(cmd) { return; }
@@ -140,42 +121,79 @@ fn process_command(cmd: &str) {
     println!("{}: command not found", cmd);
 }
 
-// ----------------------------------------------------------------
-// REPL Loop with Autocompletion & Redirection
-// ----------------------------------------------------------------
+// --------------------- Rustyline Autocompletion ---------------------
+
+// Import rustyline traits from their private submodules.
+use rustyline::completion::{Completer, Candidate};
+use rustyline::error::ReadlineError;
+use rustyline::{Editor, Context, Helper};
+use rustyline::hint::Hinter;
+use rustyline::highlight::Highlighter;
+use rustyline::validate::Validator;
+
+#[derive(Debug)]
+struct MyCandidate(String);
+impl Candidate for MyCandidate {
+    fn display(&self) -> &str { &self.0 }
+    fn replacement(&self) -> &str { &self.0 }
+}
+
+struct MyHelper;
+impl Completer for MyHelper {
+    type Candidate = MyCandidate;
+    fn complete(&self, line: &str, _pos: usize, _ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<MyCandidate>)> {
+        // Only complete when the input is a single token.
+        let builtins = ["echo", "exit"];
+        if line.contains(' ') {
+            return Ok((0, Vec::new()));
+        }
+        let candidates: Vec<MyCandidate> = builtins.iter()
+            .filter(|&&cmd| cmd.starts_with(line) && cmd != line)
+            .map(|&cmd| MyCandidate(format!("{} ", cmd)))
+            .collect();
+        Ok((0, candidates))
+    }
+}
+impl Hinter for MyHelper {
+    type Hint = String;
+    fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> { None }
+}
+impl Highlighter for MyHelper {}
+impl Validator for MyHelper {}
+impl Helper for MyHelper {}
+
+// --------------------- REPL Loop using Rustyline ---------------------
 
 pub fn start_shell() {
-    let stdin = io::stdin();
-    let mut input = String::new();
-
+    // Note: Editor requires two generic arguments. We use the default history.
+    let mut rl = Editor::<MyHelper, rustyline::history::DefaultHistory>::new().unwrap();
+    rl.set_helper(Some(MyHelper));
     loop {
-        input.clear();
-        print!("$ ");
-        io::stdout().flush().unwrap();
-        if stdin.read_line(&mut input).is_err() {
-            break;
-        }
-        let trimmed_input = input.trim();
-        if trimmed_input.is_empty() {
-            continue;
-        }
-        
-        // Check for autocompletion: if input contains a tab character.
-        if trimmed_input.contains('\t') {
-            let without_tab = trimmed_input.replace("\t", "");
-            if let Some(completed) = autocomplete_builtin(&without_tab) {
-                // Print the autocompleted command so the user sees it.
-                println!("{}", completed);
+        let readline = rl.readline("$ ");
+        match readline {
+            Ok(line) => {
+                rl.add_history_entry(line.as_str());
+                let trimmed = line.trim_end_matches('\n');
+                if trimmed.is_empty() { continue; }
+                if trimmed.contains('>') {
+                    let (cmd_part, redir_spec) = parse_command_and_redirections(trimmed);
+                    run_command_with_redirections(&cmd_part, redir_spec);
+                } else {
+                    process_command(trimmed);
+                }
+            },
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
                 continue;
+            },
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            },
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break;
             }
-        }
-        
-        // Check if the command line includes any redirection operator.
-        if trimmed_input.contains('>') {
-            let (cmd_part, redir_spec) = parse_command_and_redirections(trimmed_input);
-            run_command_with_redirections(&cmd_part, redir_spec);
-        } else {
-            process_command(trimmed_input);
         }
     }
 }

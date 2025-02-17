@@ -15,3 +15,4 @@ bytes = "1.3.0"                                  # helps manage buffers
 thiserror = "1.0.38"                             # error handling
 regex = "1.7"
 nix = "0.26"
+rustyline = "11.0.0"
